@@ -1,0 +1,48 @@
+name: API dump
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Dump Minecraft API
+        shell: bash
+        run: |
+          Z=$(ls ./*.zip 2>/dev/null | sort -V | tail -1); if [ -n "$Z" ]; then echo "Usando $Z"; unzip -q -o "$Z"; fi
+          G=$(find . -maxdepth 2 -name gradlew | head -1)
+          cd "$(dirname "$G")"
+          chmod +x gradlew
+          # Solo configura Loom (descarga y mapea Minecraft); si algo falla no importa
+          ./gradlew :ModernUI-Fabric:dependencies --no-daemon > "$GITHUB_WORKSPACE/gradle-config.log" 2>&1 || true
+          J=""
+          for f in $(find "$HOME/.gradle" -name "*.jar" -path "*loom*" -size +5M 2>/dev/null); do
+            if unzip -Z1 "$f" 2>/dev/null | grep -q '^net/minecraft/client/Minecraft.class$'; then J="$f"; echo "jar mojmap: $f"; break; fi
+          done
+          if [ -z "$J" ]; then echo "No encontre el jar de Minecraft"; find "$HOME/.gradle" -name "*.jar" -path "*loom*" -size +5M | head -30; exit 1; fi
+          unzip -Z1 "$J" | grep '\.class$' | sed 's/\.class$//' > "$GITHUB_WORKSPACE/all-classes.txt"
+          grep -E '^(com/mojang/blaze3d/(font|textures|pipeline|buffers|vertex|systems|opengl|platform/Window)|net/minecraft/client/gui/(font|render)|net/minecraft/client/renderer/(rendertype|texture)|net/minecraft/client/input)' "$GITHUB_WORKSPACE/all-classes.txt" > sel.txt
+          grep -E '^(net/minecraft/util/Util|net/minecraft/client/(gui/GuiGraphics|gui/Font|gui/components/EditBox|KeyboardHandler|MouseHandler|KeyMapping|Minecraft|renderer/(MultiBufferSource|LevelRenderer|GameRenderer|SubmitNodeStorage|RenderPipelines)))$' "$GITHUB_WORKSPACE/all-classes.txt" >> sel.txt
+          grep -vE '\$[0-9]+$' sel.txt | sort -u | sed 's#/#.#g' > classes.txt
+          wc -l classes.txt
+          javap -p -cp "$J" $(cat classes.txt) > "$GITHUB_WORKSPACE/mc-api-dump.txt" 2>&1 || true
+          wc -l "$GITHUB_WORKSPACE/mc-api-dump.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mc-api-dump
+          path: |
+            ${{ github.workspace }}/mc-api-dump.txt
+            ${{ github.workspace }}/all-classes.txt
+            ${{ github.workspace }}/gradle-config.log
+          if-no-files-found: warn
