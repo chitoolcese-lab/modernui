@@ -32,7 +32,7 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          if ls ./*.zip >/dev/null 2>&1; then unzip -q -o ./*.zip; fi
+          Z=$(ls ./*.zip 2>/dev/null | sort -V | tail -1); if [ -n "$Z" ]; then echo "Usando $Z"; unzip -q -o "$Z"; fi
           G=$(find . -maxdepth 2 -name gradlew | head -1)
           if [ -z "$G" ]; then echo "No encuentro gradlew" | tee "$GITHUB_WORKSPACE/build.log"; exit 1; fi
           cd "$(dirname "$G")"
